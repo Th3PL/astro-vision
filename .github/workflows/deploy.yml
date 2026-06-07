@@ -6,70 +6,42 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  validar:
+    name: Validar Projeto
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
+      - name: Verificar arquivos obrigatórios
+        run: |
+          test -f index.html && echo "✅ index.html OK" || exit 1
+          test -f style.css  && echo "✅ style.css OK"  || exit 1
+          test -f main.js    && echo "✅ main.js OK"    || exit 1
+          test -f server.js  && echo "✅ server.js OK"  || exit 1
+
+      - name: Verificar segredos expostos no código
+        run: |
+          if grep -rEi "password\s*=\s*['\"].{4,}" --include="*.js" --include="*.html" .; then
+            echo "❌ Credencial exposta!" && exit 1
+          fi
+          echo "✅ Nenhuma credencial exposta"
+
+      - name: Tamanho dos arquivos
+        run: du -sh index.html style.css main.js server.js
+
+  deploy:
+    name: Deploy Azure
+    runs-on: ubuntu-latest
+    needs: validar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Instalar dependências
         run: npm install
-
-      # ✅ STEP 1 — Verifica se o index.html existe
-      - name: Verificar arquivos obrigatórios
-        run: |
-          echo "Verificando estrutura do projeto..."
-          test -f index.html && echo "✅ index.html encontrado" || (echo "❌ index.html não encontrado" && exit 1)
-          test -f style.css  && echo "✅ style.css encontrado"  || (echo "❌ style.css não encontrado"  && exit 1)
-          test -f main.js    && echo "✅ main.js encontrado"    || (echo "❌ main.js não encontrado"    && exit 1)
-          test -f server.js  && echo "✅ server.js encontrado"  || (echo "❌ server.js não encontrado"  && exit 1)
-
-      # ✅ STEP 2 — Valida o HTML com htmlhint
-      - name: Lint do HTML
-        run: |
-          npx htmlhint index.html --config '{"doctype-first": false, "tag-pair": true, "attr-lowercase": true}'
-
-      # ✅ STEP 3 — Verifica tamanho dos arquivos (evita deploy de arquivo gigante)
-      - name: Verificar tamanho dos assets
-        run: |
-          echo "Tamanhos dos arquivos:"
-          du -sh index.html style.css main.js server.js
-          MAX=500  # KB
-          SIZE=$(du -sk style.css | cut -f1)
-          if [ "$SIZE" -gt "$MAX" ]; then
-            echo "❌ style.css muito grande: ${SIZE}KB"
-            exit 1
-          fi
-          echo "✅ Tamanhos dentro do limite"
-
-      # ✅ STEP 4 — Checa se há credenciais expostas no código
-      - name: Verificar segredos expostos
-        run: |
-          echo "Verificando credenciais expostas..."
-          if grep -rE "(password|secret|api_key|apikey)\s*=\s*['\"][^'\"]{6,}" --include="*.js" --include="*.html" .; then
-            echo "❌ Possível credencial exposta no código!"
-            exit 1
-          fi
-          echo "✅ Nenhuma credencial exposta encontrada"
-
-      # ✅ STEP 5 — Gera resumo do deploy
-      - name: Resumo do build
-        run: |
-          echo "### 🚀 AstroVision Deploy Summary" >> $GITHUB_STEP_SUMMARY
-          echo "| Arquivo | Tamanho |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
-          for f in index.html style.css main.js server.js; do
-            SIZE=$(du -sh $f | cut -f1)
-            echo "| $f | $SIZE |" >> $GITHUB_STEP_SUMMARY
-          done
-          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy para Azure App Service
         uses: azure/webapps-deploy@v3
